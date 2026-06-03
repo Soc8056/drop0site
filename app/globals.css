@@ -106,14 +106,58 @@ input, textarea, select { font: inherit; }
    AUTH PAGES
    ============================================================ */
 
-.auth-shell {
+/* Split layout: editorial photo panel (left) + form (right). */
+.auth-split {
   min-height: 100svh;
-  background: var(--bg-inverse);
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  background: var(--bg-page);
+}
+
+.auth-aside {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-5);
+  background: var(--color-ink) center 28% / cover no-repeat;
+  background-image: url('/auth/aside-1nri.jpg');
+  color: var(--color-salt);
+}
+.auth-aside__scrim { position: absolute; inset: 0; background: rgba(17,17,17,0.52); }
+.auth-aside__content {
+  position: relative; z-index: 1; width: 100%;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: var(--space-8) var(--space-7);
+}
+.auth-aside__wordmark {
+  font-family: var(--font-display); font-weight: var(--fw-semi);
+  font-size: var(--fs-18); letter-spacing: var(--ls-wordmark); text-transform: uppercase;
+  color: var(--color-salt); text-decoration: none;
+}
+.auth-logo { height: 28px; width: auto; display: block; }
+.auth-aside__eyebrow {
+  font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wider);
+  text-transform: uppercase; color: var(--signal-gold);
+}
+.auth-aside__title {
+  font-family: var(--font-display); font-size: clamp(var(--fs-32), 3vw, var(--fs-64));
+  font-weight: var(--fw-medium); letter-spacing: var(--ls-tight); line-height: var(--lh-tight);
+  color: var(--color-salt); margin: var(--space-4) 0 var(--space-6);
+}
+.auth-aside__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.auth-aside__list li {
+  font-family: var(--font-body); font-size: var(--fs-16); color: rgba(250,250,248,0.84);
+  position: relative; padding-left: var(--space-5);
+}
+.auth-aside__list li::before {
+  content: ""; position: absolute; left: 0; top: 0.7em; width: 12px; height: 1px; background: var(--signal-gold);
+}
+.auth-aside__trust {
+  font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide);
+  text-transform: uppercase; color: rgba(250,250,248,0.6); margin: var(--space-6) 0 0;
+}
+
+.auth-main {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--bg-inverse); padding: var(--space-7) var(--space-5);
 }
 
 .auth-wordmark {
@@ -129,6 +173,13 @@ input, textarea, select { font: inherit; }
   text-align: center;
 }
 .auth-wordmark:hover { opacity: 0.7; }
+.auth-wordmark--mobile { display: none; }
+
+@media (max-width: 860px) {
+  .auth-split { grid-template-columns: 1fr; }
+  .auth-aside { display: none; }
+  .auth-wordmark--mobile { display: block; }
+}
 
 .auth-card {
   width: 100%;
@@ -360,7 +411,7 @@ input, textarea, select { font: inherit; }
 
 .account-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 1px;
   background: rgba(250, 250, 248, 0.10);
   border: 1px solid rgba(250, 250, 248, 0.10);
@@ -394,6 +445,63 @@ input, textarea, select { font: inherit; }
 
 .account-stat-value--gold { color: var(--signal-gold); }
 .account-stat-value--muted { color: rgba(250, 250, 248, 0.35); font-size: var(--fs-16); }
+.account-stat-value--sm { font-size: var(--fs-16); }
+.account-stat-sub { color: rgba(250, 250, 248, 0.35); font-size: var(--fs-14); }
+
+/* ---- Membership credential card ---- */
+.cred {
+  border: 1px solid rgba(201, 146, 30, 0.55);
+  background: rgba(250, 250, 248, 0.025);
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.cred__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: var(--space-8);
+}
+.cred__brand {
+  font-family: var(--font-display); font-weight: var(--fw-semi);
+  letter-spacing: var(--ls-wordmark); text-transform: uppercase;
+  font-size: var(--fs-14); color: var(--fg-inverse);
+}
+.cred__tier {
+  font-family: var(--font-mono); font-size: var(--fs-12);
+  letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--signal-gold);
+}
+.cred__numberwrap { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-7); }
+.cred__kicker {
+  font-family: var(--font-mono); font-size: var(--fs-12);
+  letter-spacing: var(--ls-wider); text-transform: uppercase; color: rgba(250, 250, 248, 0.4);
+}
+.cred__number {
+  font-family: var(--font-mono); font-size: clamp(3.25rem, 11vw, 5.5rem); line-height: 1;
+  letter-spacing: 0.04em; color: var(--signal-gold); font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+}
+.cred__number--pending { color: rgba(250, 250, 248, 0.22); }
+.cred__pendingnote { font-family: var(--font-body); font-size: var(--fs-14); color: rgba(250, 250, 248, 0.45); }
+.cred__foot {
+  display: flex; justify-content: space-between; gap: var(--space-4);
+  border-top: 1px solid rgba(250, 250, 248, 0.1); padding-top: var(--space-4);
+}
+.cred__field { display: flex; flex-direction: column; gap: 4px; }
+.cred__field--right { text-align: right; }
+.cred__label {
+  font-family: var(--font-mono); font-size: var(--fs-12);
+  letter-spacing: var(--ls-wide); text-transform: uppercase; color: rgba(250, 250, 248, 0.4);
+}
+.cred__value { font-family: var(--font-body); font-size: var(--fs-14); color: var(--fg-inverse); }
+
+.account-cta { margin-bottom: var(--space-7); }
+.account-cta-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-size: var(--fs-13); font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide); text-transform: uppercase; text-decoration: none;
+  background: var(--signal-gold); color: var(--color-ink); padding: var(--space-4) var(--space-6);
+  transition: background var(--dur-state) var(--ease-calm);
+}
+.account-cta-btn:hover { background: #A57A18; opacity: 1; }
+.account-fallback { font-family: var(--font-mono); font-size: var(--fs-13); color: rgba(250, 250, 248, 0.4); }
 
 .account-referral-block {
   border: 1px solid rgba(250, 250, 248, 0.12);
