@@ -18,9 +18,9 @@ function generateReferralCode(): string {
 }
 
 export async function signupAction(prevState: AuthState, formData: FormData): Promise<AuthState> {
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
-  const confirmPassword = formData.get('confirm_password') as string
+  const email = String(formData.get('email') ?? '')
+  const password = String(formData.get('password') ?? '')
+  const confirmPassword = String(formData.get('confirm_password') ?? '')
   const tcAgreed = formData.get('tc_agreed') === 'on'
   const referredByCode = ((formData.get('referred_by') as string) || '').trim().toUpperCase() || null
 
@@ -32,11 +32,8 @@ export async function signupAction(prevState: AuthState, formData: FormData): Pr
     return { error: 'Email and password are required.' }
   }
 
-  // Rate limit per IP and per account (ACC-7)
-  if (!(await checkAuthRateLimit('signup', email))) {
-    return { error: RATE_LIMIT_MESSAGE }
-  }
-
+  // Validate input BEFORE consuming a rate-limit token, otherwise honest typos
+  // burn the user's per-minute budget (ARCH-H1).
   if (password !== confirmPassword) {
     return { error: 'Passwords do not match.' }
   }
@@ -45,6 +42,11 @@ export async function signupAction(prevState: AuthState, formData: FormData): Pr
   const pwCheck = await validatePassword(password)
   if (!pwCheck.ok) {
     return { error: pwCheck.error }
+  }
+
+  // Rate limit per IP and per account (ACC-7) — runs AFTER input validation.
+  if (!(await checkAuthRateLimit('signup', email))) {
+    return { error: RATE_LIMIT_MESSAGE }
   }
 
   const supabase = createServerClient()
@@ -92,16 +94,28 @@ export async function signupAction(prevState: AuthState, formData: FormData): Pr
   })
 
   if (profileError) {
-    // Auth user created but profile failed — log and continue so the user isn't blocked
-    console.error('[signup] profile insert failed:', profileError.message)
+    // Auth user created but profile failed: an orphan auth user can log in
+    // but every downstream query that joins public.users (account page,
+    // fulfill_order's FOR UPDATE on users) breaks until the row exists.
+    // Delete the auth user so the customer can retry signup cleanly, rather
+    // than ending up wedged in a partial state.
+    console.error('[signup] profile insert failed, rolling back auth user:', profileError.message)
+    try {
+      await admin.auth.admin.deleteUser(data.user.id)
+    } catch (cleanupErr) {
+      // If cleanup itself fails, the user lands in the broken state we were
+      // trying to avoid — log loudly so ops can intervene manually.
+      console.error('[signup] orphan auth user cleanup failed:', cleanupErr)
+    }
+    return { error: 'Could not finish account creation. Please try again.' }
   }
 
   redirect(`/verify-email?email=${encodeURIComponent(email)}`)
 }
 
 export async function loginAction(prevState: AuthState, formData: FormData): Promise<AuthState> {
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
+  const email = String(formData.get('email') ?? '')
+  const password = String(formData.get('password') ?? '')
 
   if (!email || !password) {
     return { error: 'Email and password are required.' }
@@ -128,11 +142,24 @@ export async function loginAction(prevState: AuthState, formData: FormData): Pro
   }
 
   await logAudit({ event: 'auth.login_success', level: 'info', detail: { email } })
-  redirect('/account')
+
+  // Honour `next` query param so post-login lands on the page the visitor
+  // originally requested (e.g. /admin/setup, /checkout). Only accept
+  // same-origin internal paths to prevent open-redirect abuse.
+  const requestedNext = String(formData.get('next') ?? '')
+  const safeNext = isSafeInternalPath(requestedNext) ? requestedNext : '/account'
+  redirect(safeNext)
+}
+
+function isSafeInternalPath(p: string): boolean {
+  if (!p) return false
+  // Must start with single "/" and not "//", not protocol-relative, not
+  // a backslash-prefixed path that some browsers normalise to https://.
+  return /^\/(?!\/|\\)/.test(p)
 }
 
 export async function forgotPasswordAction(prevState: AuthState, formData: FormData): Promise<AuthState> {
-  const email = formData.get('email') as string
+  const email = String(formData.get('email') ?? '')
 
   if (!email) {
     return { error: 'Email is required.' }
@@ -148,16 +175,19 @@ export async function forgotPasswordAction(prevState: AuthState, formData: FormD
     redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback?next=/reset-password`,
   })
 
+  // Always respond identically whether or not the email exists — Supabase's
+  // raw error message previously revealed registered vs. unregistered status
+  // (ASVS 2.5.6). Log server-side instead.
   if (error) {
-    return { error: error.message }
+    console.error('[forgotPassword] error:', error.message)
   }
 
   return { success: true, email }
 }
 
 export async function resetPasswordAction(prevState: AuthState, formData: FormData): Promise<AuthState> {
-  const password = formData.get('password') as string
-  const confirmPassword = formData.get('confirm_password') as string
+  const password = String(formData.get('password') ?? '')
+  const confirmPassword = String(formData.get('confirm_password') ?? '')
 
   if (!password) {
     return { error: 'Password is required.' }
@@ -174,6 +204,25 @@ export async function resetPasswordAction(prevState: AuthState, formData: FormDa
   }
 
   const supabase = createServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // updateUser({ password }) succeeds for ANY logged-in user, not only those
+  // who arrived via the password-recovery link. Without this guard, any user
+  // already holding a normal session could POST here and change their own
+  // password without the additional verification expected of a reset.
+  // recovery_sent_at is set by Supabase when a recovery email is issued and
+  // cleared once the recovery session is used; if it's nullish, this isn't
+  // a recovery session and we refuse.
+  if (!user || !user.recovery_sent_at) {
+    return { error: 'Invalid or expired password reset link.' }
+  }
+
+  // Rate-limit by user id so a leaked recovery session can't be used to spray
+  // password updates.
+  if (!(await checkAuthRateLimit('reset_complete', user.id))) {
+    return { error: RATE_LIMIT_MESSAGE }
+  }
+
   const { error } = await supabase.auth.updateUser({ password })
 
   if (error) {
@@ -185,15 +234,27 @@ export async function resetPasswordAction(prevState: AuthState, formData: FormDa
 
 export async function signoutAction() {
   const supabase = createServerClient()
-  await supabase.auth.signOut()
+  // Explicit `scope: 'global'` documents intent: revoke the refresh token
+  // server-side, not just locally. If the network call fails, the refresh
+  // token remains valid until expiry — log so ops can chase it. We still
+  // redirect to /login because the cookies are cleared regardless via the
+  // SSR client's remove() handler.
+  const { error } = await supabase.auth.signOut({ scope: 'global' })
+  if (error) console.error('[signout] token revocation failed:', error.message)
   redirect('/login')
 }
 
 export async function resendVerificationAction(prevState: AuthState, formData: FormData): Promise<AuthState> {
-  const email = formData.get('email') as string
+  const email = String(formData.get('email') ?? '')
 
   if (!email) {
     return { error: 'Email is required.' }
+  }
+
+  // Without this gate any client could call this in a tight loop for any
+  // email and rack up unbounded Resend cost + Supabase auth spam.
+  if (!(await checkAuthRateLimit('resend', email))) {
+    return { error: RATE_LIMIT_MESSAGE }
   }
 
   const supabase = createServerClient()
@@ -206,7 +267,9 @@ export async function resendVerificationAction(prevState: AuthState, formData: F
   })
 
   if (error) {
-    return { error: error.message }
+    // Don't leak whether the email is registered. Log server-side for ops
+    // visibility, return a generic success-style response either way.
+    console.error('[resendVerification] error:', error.message)
   }
 
   return { success: true, email }

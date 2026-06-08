@@ -17,7 +17,10 @@ export const dynamic = 'force-dynamic'
 
 function authorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET
-  if (!secret) return false
+  // Reject the placeholder value too — a misconfigured dev/preview env that
+  // ships CRON_SECRET="dummy" would otherwise authenticate anyone who knows
+  // the default. Matches the dummy-check in /admin/setup.
+  if (!secret || secret === 'dummy') return false
   return request.headers.get('authorization') === `Bearer ${secret}`
 }
 
@@ -46,10 +49,27 @@ export async function GET(request: Request) {
   }
 
   // ── REC-1: fulfill Stripe-succeeded payments missing a completed order ────
+  // Note `created` is the PI's birth time, not its success time. A PI minted
+  // 24h ago that finishes 3DS one hour ago is invisible to a 24h-lookback
+  // search. autoPagingEach also exhausts pages so volume above limit:100
+  // doesn't silently drop on the floor.
+  //
+  // Hard caps below: Vercel functions time out at 60s. Without these caps a
+  // backlog after a Stripe outage could time out mid-iteration, leaving
+  // partial state and no checkpoint. Bound by count AND wall time; the next
+  // hourly run picks up where this left off.
+  const RUN_START = Date.now()
+  const TIME_BUDGET_MS = 50_000
+  const PROCESS_BUDGET = 500
+  let processed = 0
   const sinceSecs = Math.floor(Date.now() / 1000) - CONFIG.RECONCILE_LOOKBACK_HOURS * 3600
   try {
-    const pis = await stripe.paymentIntents.list({ created: { gte: sinceSecs }, limit: 100 })
-    for (const pi of pis.data) {
+    for await (const pi of stripe.paymentIntents.list({
+      created: { gte: sinceSecs },
+      limit: 100,
+    })) {
+      if (++processed > PROCESS_BUDGET) break
+      if (Date.now() - RUN_START > TIME_BUDGET_MS) break
       if (pi.status !== 'succeeded') continue
       const userId = pi.metadata?.user_id
       if (!userId) continue
@@ -69,6 +89,10 @@ export async function GET(request: Request) {
           stripePaymentIntentId: pi.id,
           eventId: `reconcile:${pi.id}`,
           eventType: 'reconcile',
+          amountChargedCents: pi.amount_received,
+          appliedCreditCents:
+            parseInt(pi.metadata?.applied_credit_cents ?? '0', 10) || 0,
+          promoCode: pi.metadata?.promo_code || null,
           emailOverride: pi.receipt_email,
         })
         summary.reconciled += 1
@@ -98,6 +122,10 @@ export async function GET(request: Request) {
     await logAudit({ event: 'reconcile.drift_detect_failed', level: 'alert', detail: { message: driftErr.message } })
   } else {
     for (const row of (drift ?? []) as { user_id: string; cache_cents: number; ledger_cents: number }[]) {
+      // Defensive: if the RPC's column naming ever drifts (rename, codegen
+      // shape change), skip silently rather than calling recompute with
+      // p_user_id=undefined and corrupting an unrelated user's balance.
+      if (typeof row?.user_id !== 'string' || !row.user_id) continue
       await admin.rpc('recompute_credit_balance', { p_user_id: row.user_id })
       summary.driftCorrected += 1
       await logAudit({

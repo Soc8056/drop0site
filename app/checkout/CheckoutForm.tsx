@@ -1,13 +1,23 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import Link from 'next/link'
 import Image from 'next/image'
 
-const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
+// Detect a real Stripe publishable key. Vercel preview/test envs sometimes ship
+// the placeholder "pk_test_51Dummy…" — Stripe will reject it and the SDK throws
+// "Stripe has not loaded". Catching it here surfaces a clearer error and stops
+// us from ever rendering <Elements> with a broken promise.
+const RAW_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ''
+const PK_LOOKS_REAL =
+  /^pk_(test|live)_[A-Za-z0-9]{20,}$/.test(RAW_PK) && !/dummy/i.test(RAW_PK)
+const stripePromise = PK_LOOKS_REAL
+  ? loadStripe(RAW_PK).catch((err) => {
+      console.error('[Stripe] loadStripe failed:', err)
+      return null
+    })
   : null
 
 const DROP0_PRICE_CENTS = 2000
@@ -48,6 +58,22 @@ function pad3(n: number) {
 
 function money(cents: number) {
   return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
+// Map common Stripe decline_code / error code values to user-friendly hints.
+// Returns undefined for codes we don't have specific copy for — the caller
+// falls back to a generic "check your details" message.
+function declineHint(code?: string): string | undefined {
+  switch (code) {
+    case 'insufficient_funds':       return "Your card was declined for insufficient funds. Try a different card."
+    case 'card_declined':             return "Your bank declined this card. Try another card or contact your bank."
+    case 'expired_card':              return "Your card has expired. Try a different card."
+    case 'incorrect_cvc':             return "The security code didn't match. Double-check the CVC on the back of your card."
+    case 'processing_error':          return "Your bank had a temporary issue. Wait a moment and try again."
+    case 'authentication_required':   return "Your bank wants to verify this purchase — complete the verification and we'll retry."
+    case 'do_not_honor':              return "Your bank declined this card. Call the number on the back of your card or try another card."
+    default:                          return undefined
+  }
 }
 
 // ── Shared summary panel — rendered twice (mobile bar + grid) ─────────────────
@@ -202,6 +228,26 @@ function InnerForm({
   const stripe   = useStripe()
   const elements = useElements()
 
+  // The Stripe webhook assigns the real member number asynchronously, so the
+  // success screen polls /api/member-number until it sees the assigned value.
+  // Falls through silently after a few seconds — the user still gets the
+  // success UI; the number arrives by email.
+  const pollAssignedNumber = async () => {
+    for (let i = 0; i < 10; i++) {
+      try {
+        const r = await fetch('/api/member-number', { cache: 'no-store' })
+        if (r.ok) {
+          const d = await r.json()
+          if (d.memberNumber != null) {
+            setSuccessMemberNo(d.memberNumber)
+            return
+          }
+        }
+      } catch { /* keep polling */ }
+      await new Promise((res) => setTimeout(res, 1500))
+    }
+  }
+
   const applyPromo = async () => {
     const code = promoInput.trim()
     if (!code) return
@@ -240,8 +286,11 @@ function InnerForm({
     setCoState('processing')
 
     try {
-      // Zarathustra free path — skip Stripe
-      if (promo.isFree) {
+      // Any path with a $0 effective total (free promo OR full credit cover)
+      // skips Stripe entirely. Without this guard the paid path would clamp
+      // amount to the Stripe 50¢ minimum and charge the user's card despite
+      // the UI showing "$0".
+      if (promo.isFree || effectiveTotal === 0) {
         const res = await fetch('/api/payment-intent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -262,7 +311,11 @@ function InnerForm({
       // Paid path
       if (!stripe || !elements) {
         setErrorTitle('Payment unavailable.')
-        setErrorBody('Stripe has not loaded. Please refresh and try again.')
+        setErrorBody(
+          PK_LOOKS_REAL
+            ? 'Stripe is still loading. Please wait a moment and try again.'
+            : "Payments aren't configured for this site yet. Email caleb@chariotarchive.com to claim your spot."
+        )
         setCoState('error')
         return
       }
@@ -300,13 +353,21 @@ function InnerForm({
       })
 
       if (confirmError) {
+        // Surface Stripe's decline_code / code so the user gets actionable
+        // guidance ("Insufficient funds — try a different card") instead of
+        // a generic "card was declined" string.
+        const code = (confirmError as { decline_code?: string; code?: string }).decline_code
+                  ?? (confirmError as { code?: string }).code
         setErrorTitle(confirmError.message ?? 'Payment failed.')
-        setErrorBody("Your card wasn't charged. Check the details and try again.")
+        setErrorBody(
+          declineHint(code) ?? "Your card wasn't charged. Check the details and try again."
+        )
         setCoState('error')
         return
       }
 
       setCoState('success')
+      pollAssignedNumber()
     } catch {
       setErrorTitle('Something went wrong.')
       setErrorBody('Unable to reach our payment processor. Please try again.')
@@ -420,30 +481,13 @@ function InnerForm({
             </div>
           ) : (
             <>
-              {/* Express pay row */}
-              <div className="co-expay-wrap">
-                <div className="co-expay-row">
-                  <button type="button" className="co-expay co-expay--apple" aria-label="Pay with Apple Pay">
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <path d="M17.05 12.04c-.02-2.06 1.68-3.05 1.76-3.1-.96-1.4-2.46-1.6-2.99-1.62-1.27-.13-2.48.75-3.13.75-.64 0-1.64-.73-2.7-.71-1.39.02-2.67.81-3.38 2.05-1.44 2.5-.37 6.2 1.04 8.23.69 1 1.51 2.12 2.58 2.08 1.04-.04 1.43-.67 2.69-.67 1.25 0 1.61.67 2.71.65 1.12-.02 1.83-1.02 2.51-2.02.79-1.16 1.12-2.28 1.14-2.34-.03-.01-2.18-.84-2.2-3.33zM15 6.2c.57-.69.95-1.65.85-2.6-.82.03-1.81.54-2.4 1.23-.53.61-.99 1.59-.87 2.52.91.07 1.85-.46 2.42-1.15z" />
-                    </svg>
-                    <span>Pay</span>
-                  </button>
-                  <button type="button" className="co-expay co-expay--gpay" aria-label="Pay with Google Pay">
-                    <svg viewBox="0 0 41 17" aria-hidden="true" height="18">
-                      <path fill="#5f6368" d="M19.5 8.3v4.9h-1.6V1.2h4.1c1 0 1.9.3 2.6 1 .7.6 1.1 1.5 1.1 2.4 0 1-.4 1.8-1.1 2.5-.7.6-1.6 1-2.6 1h-2.5zm0-5.6v4.1h2.6c.6 0 1.1-.2 1.5-.6.8-.8.8-2 0-2.8-.4-.4-.9-.6-1.5-.7h-2.6z" />
-                      <path fill="#5f6368" d="M30.3 4.5c1.2 0 2.1.3 2.8.9.7.6 1 1.5 1 2.6v5.2h-1.5v-1.2h-.1c-.7 1-1.5 1.4-2.6 1.4-1 0-1.7-.3-2.4-.8-.6-.6-.9-1.2-.9-2.1 0-.9.3-1.6 1-2.1.7-.5 1.6-.8 2.7-.8.9 0 1.7.2 2.3.5v-.4c0-.6-.2-1-.7-1.4-.4-.4-1-.6-1.6-.6-.9 0-1.6.4-2.1 1.1l-1.4-.9c.8-1.1 1.9-1.6 3.3-1.6zm-2.1 6.1c0 .4.2.8.5 1 .3.3.7.4 1.2.4.6 0 1.2-.2 1.7-.7.5-.5.8-1 .8-1.6-.5-.4-1.2-.6-2-.6-.6 0-1.2.2-1.6.5-.4.3-.6.6-.6 1.1z" />
-                      <path fill="#5f6368" d="M41 4.7l-5 11.5h-1.6l1.9-4-3.3-7.5h1.7l2.4 5.7 2.3-5.7z" />
-                      <path fill="#4285f4" d="M13.3 7.3c0-.5 0-1-.1-1.4H6.8v2.7h3.7c-.2.9-.6 1.6-1.4 2.1v1.8h2.3c1.3-1.2 2.1-3 2.1-5.2z" />
-                      <path fill="#34a853" d="M6.8 14c1.9 0 3.5-.6 4.7-1.7l-2.3-1.8c-.6.4-1.4.7-2.4.7-1.9 0-3.4-1.3-4-3H.4v1.8C1.6 12.5 4 14 6.8 14z" />
-                      <path fill="#fbbc04" d="M2.8 8.2c-.2-.5-.2-1-.2-1.6s.1-1.1.2-1.6V3.2H.4C-.1 4.3-.1 5.5-.1 6.6s0 2.3.5 3.4l2.4-1.8z" />
-                      <path fill="#ea4335" d="M6.8 2.6c1.1 0 2 .4 2.8 1.1l2-2C10.3.5 8.7-.1 6.8-.1 4 0 1.6 1.5.4 3.8l2.4 1.8c.6-1.7 2.1-3 4-3z" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div className="co-ordiv">or pay with card</div>
-
+              {/* Apple Pay / Google Pay are intentionally NOT rendered here —
+                  wiring them requires Stripe ExpressCheckoutElement plus an
+                  Apple Pay domain registration file at
+                  /.well-known/apple-developer-merchantid-domain-association
+                  and HTTPS. Until that's set up, the buttons that previously
+                  lived here did nothing on click and generated support
+                  tickets. Re-add via ExpressCheckoutElement when ready. */}
               <div id="payment-element">
                 <PaymentElement options={{ layout: 'accordion' }} />
               </div>
@@ -540,6 +584,20 @@ export default function CheckoutForm({ creditBalance, userEmail, nextMemberNo }:
     if (params.get('paid') === '1') {
       setCoState('success')
       window.history.replaceState({}, '', '/checkout')
+      // Redirect-based 3DS came back; fetch the assigned number so the success
+      // card shows the real member number, not the page-load estimate.
+      ;(async () => {
+        for (let i = 0; i < 10; i++) {
+          try {
+            const r = await fetch('/api/member-number', { cache: 'no-store' })
+            if (r.ok) {
+              const d = await r.json()
+              if (d.memberNumber != null) { setSuccessMemberNo(d.memberNumber); return }
+            }
+          } catch { /* keep polling */ }
+          await new Promise((res) => setTimeout(res, 1500))
+        }
+      })()
     }
   }, [])
 
@@ -554,12 +612,19 @@ export default function CheckoutForm({ creditBalance, userEmail, nextMemberNo }:
   const effectiveTotal = promo.isFree ? 0 : Math.max(afterCredit - promo.discountCents, 0)
   const promoLabel     = promoInput.trim().toUpperCase()
 
-  const elementsOptions = {
-    mode: 'payment' as const,
-    amount: Math.max(effectiveTotal, 50),
-    currency: 'usd' as const,
-    appearance: stripeAppearance,
-  }
+  // Stripe's React SDK compares <Elements options={...}> by reference. A
+  // fresh object on every render forces a full remount of <PaymentElement>,
+  // which destroys the iframe and wipes any card number the user already
+  // typed — extremely visible when they apply a promo code mid-form.
+  const elementsOptions = useMemo(
+    () => ({
+      mode: 'payment' as const,
+      amount: Math.max(effectiveTotal, 50),
+      currency: 'usd' as const,
+      appearance: stripeAppearance,
+    }),
+    [effectiveTotal]
+  )
 
   const summaryProps: SummaryPanelProps = {
     nextMemberNo,
@@ -586,13 +651,13 @@ export default function CheckoutForm({ creditBalance, userEmail, nextMemberNo }:
             <span>Back</span>
           </button>
 
-          <Link href="/" aria-label="Chariot home">
+          <Link href="/" aria-label="Chariot home" className="co-nav__home">
             <Image
               className="co-nav__logo"
               src="/chariot-wordmark.svg"
               alt="Chariot"
-              width={88}
-              height={20}
+              width={176}
+              height={40}
               priority
             />
           </Link>
@@ -625,12 +690,20 @@ export default function CheckoutForm({ creditBalance, userEmail, nextMemberNo }:
             </span>
             <span className="msum__r">{money(effectiveTotal)}</span>
           </button>
-          {/* Mobile summary — shown inside collapsible bar */}
+          {/* Mobile summary — bottom-sheet drawer, slides up over the form */}
           <div className="msum__panel" id="msum-panel">
             <aside className="co-summary" aria-label="Order summary (mobile)">
               <SummaryPanel {...summaryProps} />
             </aside>
           </div>
+          {/* Backdrop — tap to dismiss. Visible only when msum is open via CSS. */}
+          <button
+            type="button"
+            className="msum__backdrop"
+            aria-label="Close order summary"
+            tabIndex={msumOpen ? 0 : -1}
+            onClick={() => setMsumOpen(false)}
+          />
         </div>
 
         {/* ===== TWO-COLUMN GRID ===== */}
@@ -670,7 +743,10 @@ export default function CheckoutForm({ creditBalance, userEmail, nextMemberNo }:
             <h2 className="co-succ__h">Welcome to the founding fifty.</h2>
             <p className="co-succ__no">
               Founding Member No.{' '}
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{pad3(successMemberNo)}</span>
+              <span
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+                aria-label={`number ${successMemberNo}`}
+              >{pad3(successMemberNo)}</span>
             </p>
             <p className="co-succ__body">
               Your number is permanent — yours, in the order you joined. A receipt and welcome

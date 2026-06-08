@@ -41,10 +41,11 @@
   --signal-gold:   var(--color-kente);
   --signal-urgent: var(--color-laterite);
 
-  /* On-ink helpers */
-  --on-ink-2:   rgba(250,250,248,0.72);
-  --on-ink-3:   rgba(250,250,248,0.46);
-  --line-ink:   rgba(250,250,248,0.16);
+  /* On-ink helpers — alpha tuned so on-ink-3 text on #111 hits ≥ 4.5:1
+     for body copy (WCAG 2 AA). Previous 0.46 was ~4.33:1 and failed. */
+  --on-ink-2:   rgba(250,250,248,0.78);
+  --on-ink-3:   rgba(250,250,248,0.64);
+  --line-ink:   rgba(250,250,248,0.18);
   --line-light: rgba(17,17,17,0.14);
 
   /* Type */
@@ -142,7 +143,16 @@ input, textarea, select { font: inherit; }
   transition: background var(--dur-move) var(--ease-calm), color var(--dur-move) var(--ease-calm),
               border-color var(--dur-move) var(--ease-calm), opacity var(--dur-state) var(--ease-calm);
 }
-.btn .arr { font-size: 1.15em; line-height: 1; }
+/* Arrow nudge — Magic MCP "translate-x-0.5 on group-hover" pattern, ported
+   to vanilla CSS. Subtle 3px shift signals motion without slapstick. */
+.btn .arr {
+  font-size: 1.15em; line-height: 1; display: inline-block;
+  transition: transform var(--dur-move) var(--ease-calm);
+}
+.btn:hover .arr { transform: translateX(3px); }
+.btn:focus-visible {
+  outline: 2px solid var(--signal-gold); outline-offset: 3px;
+}
 .btn:hover { background: var(--color-shadow); border-color: var(--color-shadow); }
 .btn:active { opacity: 0.85; }
 .btn--lg { padding: 21px 38px; }
@@ -238,7 +248,8 @@ input, textarea, select { font: inherit; }
 
 /* ---- Wordmark: real CHARIOT logotype that condenses into the real O mark on scroll ---- */
 .wm { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 20px; }
-.wm__full, .wm__mark { display: block; transition: opacity .42s var(--ease-calm), transform .42s var(--ease-calm); }
+/* Decorative — the parent <a class="nav__wordmark"> owns the click target. */
+.wm__full, .wm__mark { display: block; pointer-events: none; transition: opacity .42s var(--ease-calm), transform .42s var(--ease-calm); }
 .wm__full { height: 20px; width: auto; }
 .wm__mark { position: absolute; left: 50%; top: 50%; height: 19px; width: auto;
   transform: translate(-50%, -50%) scale(0.72); opacity: 0; }
@@ -276,6 +287,10 @@ input, textarea, select { font: inherit; }
   opacity: 0; pointer-events: none; transition: opacity var(--dur-move) var(--ease-calm);
 }
 .nav.is-open .nav__overlay { opacity: 1; pointer-events: auto; }
+/* When the overlay is open the burger sits behind it (z-index 59 vs default),
+   so the close click is intercepted by the overlay. Bring the burger above
+   the overlay while it's open so the user can actually tap to close. */
+.nav.is-open .nav__burger { position: relative; z-index: 60; color: var(--color-salt); }
 .nav__overlaylink { font-family: var(--font-display); font-weight: var(--fw-medium);
   font-size: clamp(30px, 8vw, 46px); letter-spacing: var(--ls-tight); color: var(--color-salt); padding: 8px 0; }
 .nav__overlaylink:hover { color: var(--signal-gold); }
@@ -296,17 +311,54 @@ input, textarea, select { font: inherit; }
 .footer__h { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wider);
   text-transform: uppercase; color: var(--signal-gold); margin-bottom: var(--space-5); }
 .footer__col { display: flex; flex-direction: column; gap: var(--space-3); }
-.footer__col a { font-family: var(--font-body); font-size: var(--fs-16); color: var(--on-ink-2);
-  transition: color var(--dur-state) var(--ease-calm); width: fit-content; }
+/* Magic MCP "underline animates in" pattern for nav links — ported to a
+   ::after pseudo-element that scales from 0 → 1 along its left edge on hover. */
+.footer__col a {
+  position: relative; font-family: var(--font-body); font-size: var(--fs-16);
+  color: var(--on-ink-2); transition: color var(--dur-state) var(--ease-calm);
+  width: fit-content; padding-bottom: 2px;
+}
+.footer__col a::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: var(--signal-gold); transform: scaleX(0); transform-origin: left;
+  transition: transform var(--dur-move) var(--ease-calm);
+}
 .footer__col a:hover { color: var(--color-salt); }
+.footer__col a:hover::after,
+.footer__col a:focus-visible::after { transform: scaleX(1); }
+.footer__col a:focus-visible {
+  outline: 2px solid var(--signal-gold); outline-offset: 4px; border-radius: 1px;
+}
 .footer__social { display: flex; gap: 10px; margin-bottom: var(--space-2); }
 .footer__social a {
-  width: 38px; height: 38px; display: inline-grid; place-items: center;
+  /* Bumped from 38px to 44px to meet WCAG 2.5.5 / iOS HIG touch target
+     minimum (44x44 CSS px). Keeps icon visual size the same — only the
+     surrounding tap area grows. */
+  width: 44px; height: 44px; display: inline-grid; place-items: center;
   border: 1px solid var(--line-ink); color: var(--on-ink-2);
-  transition: border-color var(--dur-state) var(--ease-calm), color var(--dur-state) var(--ease-calm);
+  transition: border-color var(--dur-state) var(--ease-calm),
+              color var(--dur-state) var(--ease-calm),
+              transform var(--dur-state) var(--ease-calm);
 }
-.footer__social a:hover { border-color: var(--signal-gold); color: var(--color-salt); }
-.footer__social svg { width: 18px; height: 18px; display: block; }
+/* Magic MCP "scale on hover" pattern: the SVG inside scales 1.1 so the
+   tap target stays the same 44px (no layout shift) while the icon itself
+   pops forward. */
+.footer__social a:hover {
+  border-color: var(--signal-gold); color: var(--color-salt);
+}
+.footer__social a:hover svg { transform: scale(1.12); }
+.footer__social a:focus-visible {
+  outline: 2px solid var(--signal-gold);
+  outline-offset: 2px;
+  border-color: var(--signal-gold);
+}
+.footer__social svg {
+  width: 18px; height: 18px; display: block;
+  transition: transform var(--dur-state) var(--ease-calm);
+}
+@media (prefers-reduced-motion: reduce) {
+  .footer__social a:hover svg { transform: none; }
+}
 .footer__legal {
   display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3);
   padding-top: var(--space-5);
@@ -323,16 +375,28 @@ input, textarea, select { font: inherit; }
   font-family: var(--font-mono); font-size: var(--fs-12); font-weight: var(--fw-regular);
   letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--fg-2);
 }
-.label .opt { text-transform: none; letter-spacing: var(--ls-wide); color: var(--fg-3); }
+/* `.opt` text used to be --fg-3 (#C8C0B5) ~2.7:1 on the page — fails AA.
+   Bumped to --fg-2 (--color-shadow #5C5449) which clears 6.1:1. */
+.label .opt { text-transform: none; letter-spacing: var(--ls-wide); color: var(--fg-2); }
 .input, .textarea, .select {
   font-family: var(--font-body); font-size: var(--fs-16); color: var(--fg-1);
   background: var(--color-salt); border: 1px solid var(--border); border-radius: var(--radius-1);
-  padding: 14px 16px; width: 100%; outline: none; appearance: none; -webkit-appearance: none;
-  transition: border-color var(--dur-state) var(--ease-calm);
+  padding: 14px 16px; width: 100%; appearance: none; -webkit-appearance: none;
+  transition: border-color var(--dur-state) var(--ease-calm), box-shadow var(--dur-state) var(--ease-calm);
 }
 .textarea { min-height: 150px; resize: vertical; line-height: var(--lh-body); }
-.input:focus, .textarea:focus, .select:focus { border-color: var(--border-strong); }
-.input::placeholder, .textarea::placeholder { color: var(--fg-3); }
+/* Visible focus ring — keyboard users get a clear gold halo, mouse users
+   keep the calm border-only treatment. */
+.input:focus-visible, .textarea:focus-visible, .select:focus-visible {
+  border-color: var(--signal-gold);
+  box-shadow: 0 0 0 3px rgba(201, 146, 30, 0.28);
+  outline: none;
+}
+.input:focus:not(:focus-visible), .textarea:focus:not(:focus-visible), .select:focus:not(:focus-visible) {
+  border-color: var(--border-strong);
+  outline: none;
+}
+.input::placeholder, .textarea::placeholder { color: var(--fg-2); }
 .input[aria-invalid="true"], .textarea[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--signal-urgent); }
 .select-wrap { position: relative; }
 .select { padding-right: 44px; cursor: pointer; }

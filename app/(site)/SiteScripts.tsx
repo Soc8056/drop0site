@@ -26,10 +26,15 @@ export default function SiteScripts() {
       }
 
       const burger = nav.querySelector<HTMLElement>('[data-burger]')
+      const overlayEl = nav.querySelector<HTMLElement>('.nav__overlay')
       if (burger) {
         const onBurger = () => {
           const open = nav.classList.toggle('is-open')
           burger.setAttribute('aria-expanded', open ? 'true' : 'false')
+          burger.setAttribute('aria-label', open ? 'Close menu' : 'Open menu')
+          // Flip the overlay's aria-hidden so screen readers see its links when
+          // it's actually open. Otherwise AT renders an unreachable menu.
+          if (overlayEl) overlayEl.setAttribute('aria-hidden', open ? 'false' : 'true')
           document.body.style.overflow = open ? 'hidden' : ''
         }
         burger.addEventListener('click', onBurger)
@@ -128,16 +133,19 @@ export default function SiteScripts() {
     }
 
     // ---- Copy-to-clipboard (referral link) ----
+    // Only swap the .refl__copy-label text so the SVG icons (handled by CSS
+    // via the .is-done class) stay in the DOM and can cross-fade.
     document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((btn) => {
       const link = document.querySelector<HTMLElement>('[data-ref-link]')
+      const label = btn.querySelector<HTMLElement>('.refl__copy-label') ?? btn
       const onCopy = () => {
         const text = (link?.textContent ?? '').trim()
+        const original = label.textContent
         const done = () => {
-          const original = btn.textContent
-          btn.textContent = 'Copied'
+          label.textContent = 'Copied'
           btn.classList.add('is-done')
           setTimeout(() => {
-            btn.textContent = original
+            label.textContent = original
             btn.classList.remove('is-done')
           }, 1800)
         }
@@ -191,6 +199,89 @@ export default function SiteScripts() {
         rail.removeEventListener('scroll', update)
         window.removeEventListener('resize', update)
       })
+    }
+
+    // ---- FAQ accordions ----
+    // The /support markup ships .acc with .acc__q buttons + aria-expanded
+    // + aria-controls pointing at the .acc__a region. The CSS animates the
+    // region open when .acc has `.is-open`. Without this handler the
+    // buttons were inert — clicking did nothing.
+    const accordions = document.querySelectorAll<HTMLElement>('.acc')
+    accordions.forEach((acc) => {
+      const q = acc.querySelector<HTMLButtonElement>('.acc__q')
+      if (!q) return
+      const onToggle = () => {
+        const isOpen = acc.classList.toggle('is-open')
+        q.setAttribute('aria-expanded', isOpen ? 'true' : 'false')
+      }
+      q.addEventListener('click', onToggle)
+      cleanups.push(() => q.removeEventListener('click', onToggle))
+    })
+
+    // ---- Support contact form ----
+    // The /support page ships with [data-form] + [data-ok] / [data-err]
+    // banners but no submit handler. Without this block, the "Send message"
+    // button silently does a GET to /support (HTML5 default) and the user
+    // sees no feedback at all.
+    const contactForm = document.querySelector<HTMLFormElement>('[data-form]')
+    if (contactForm) {
+      const okBanner  = contactForm.parentElement?.querySelector<HTMLElement>('[data-ok]')
+      const errBanner = contactForm.parentElement?.querySelector<HTMLElement>('[data-err]')
+      const errText   = errBanner?.querySelector<HTMLElement>('[data-err-text]')
+      const submit    = contactForm.querySelector<HTMLButtonElement>('[data-submit]')
+
+      const setError = (msg?: string) => {
+        if (!errBanner) return
+        if (msg && errText) {
+          // Replace the message but keep the mailto fallback link if present.
+          const mailto = errText.querySelector('[data-mailto]')
+          errText.textContent = msg + ' '
+          if (mailto) errText.appendChild(mailto)
+        }
+        errBanner.classList.add('is-on')
+        okBanner?.classList.remove('is-on')
+      }
+      const setOk = () => {
+        okBanner?.classList.add('is-on')
+        errBanner?.classList.remove('is-on')
+        contactForm.reset()
+      }
+
+      const onContactSubmit = async (e: Event) => {
+        e.preventDefault()
+        if (!submit) return
+        const data = new FormData(contactForm)
+        const body = {
+          name:    String(data.get('name')    ?? ''),
+          email:   String(data.get('email')   ?? ''),
+          order:   String(data.get('order')   ?? ''),
+          issue:   String(data.get('issue')   ?? ''),
+          message: String(data.get('message') ?? ''),
+        }
+        submit.disabled = true
+        const originalLabel = submit.textContent
+        submit.textContent = 'Sending…'
+        try {
+          const res = await fetch('/api/contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+          const json = await res.json().catch(() => ({}))
+          if (res.ok && json.ok) {
+            setOk()
+          } else {
+            setError(json.error ?? 'Something went wrong sending your message.')
+          }
+        } catch {
+          setError('We could not reach the support inbox. Try emailing caleb@chariotarchive.com directly.')
+        } finally {
+          submit.disabled = false
+          if (originalLabel) submit.textContent = originalLabel
+        }
+      }
+      contactForm.addEventListener('submit', onContactSubmit)
+      cleanups.push(() => contactForm.removeEventListener('submit', onContactSubmit))
     }
 
     // ---- Newsletter inline validation + success ----

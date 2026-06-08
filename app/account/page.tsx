@@ -54,28 +54,54 @@ export default async function AccountPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: profile }, { count: referralCount }, { data: balanceCents }, { data: events }, { data: orders }] =
-    await Promise.all([
-      supabase.from('users').select('*').eq('id', user.id).single<UserProfile>(),
-      supabase
-        .from('referrals')
-        .select('*', { count: 'exact', head: true })
-        .eq('referrer_id', user.id)
-        .eq('credited', true),
-      supabase.rpc('available_balance', { p_user_id: user.id }), // ledger-derived (BAL-2), cents
-      supabase
-        .from('credit_events')
-        .select('amount_cents, reason, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .returns<CreditEvent[]>(),
-      supabase
-        .from('orders')
-        .select('amount_charged_cents, status, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .returns<OrderRow[]>(),
-    ])
+  // Errors from any of these reads would otherwise silently coerce to nulls
+  // ("0 referrals", "no member number") and look like real account state.
+  // We log them server-side and let the UI fall back to sensible empty states,
+  // but at least the failure is observable in logs instead of invisible.
+  const [profileRes, referralRes, balanceRes, eventsRes, ordersRes] = await Promise.all([
+    // Explicit column list (BOPLA): a future migration adding internal columns
+    // (risk_score, stripe_customer_id, notes) should never silently ship to the
+    // browser via the server component's serialized props.
+    supabase
+      .from('users')
+      .select('id, email, member_number, referral_code, created_at, founder_status')
+      .eq('id', user.id)
+      .single<UserProfile>(),
+    supabase
+      .from('referrals')
+      .select('*', { count: 'exact', head: true })
+      .eq('referrer_id', user.id)
+      .eq('credited', true),
+    supabase.rpc('available_balance', { p_user_id: user.id }), // ledger-derived (BAL-2), cents
+    supabase
+      .from('credit_events')
+      .select('amount_cents, reason, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .returns<CreditEvent[]>(),
+    supabase
+      .from('orders')
+      .select('amount_charged_cents, status, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .returns<OrderRow[]>(),
+  ])
+
+  for (const [label, res] of [
+    ['profile', profileRes],
+    ['referrals', referralRes],
+    ['balance', balanceRes],
+    ['credit_events', eventsRes],
+    ['orders', ordersRes],
+  ] as const) {
+    if (res.error) console.error(`[account] ${label} fetch failed:`, res.error.message)
+  }
+
+  const profile = profileRes.data
+  const referralCount = referralRes.count
+  const balanceCents = balanceRes.data
+  const events = eventsRes.data
+  const orders = ordersRes.data
 
   const email = user.email ?? profile?.email ?? ''
   const displayName = nameFromEmail(email)
@@ -83,9 +109,14 @@ export default async function AccountPage() {
   const credited = Math.min(referralCount ?? 0, 3)
   const memberNo = profile?.member_number != null ? String(profile.member_number).padStart(3, '0') : null
   const tier = profile?.founder_status ? 'Founding Member' : 'Member'
-  const memberSince = profile?.created_at ? shortDate(profile.created_at) : '—'
+  // Member-since falls back to the auth account creation date so it never reads
+  // as just "—" for users whose profile row is delayed by a webhook race.
+  const memberSinceIso = profile?.created_at ?? user.created_at ?? null
+  const memberSince = memberSinceIso ? shortDate(memberSinceIso) : '—'
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://chariotarchive.com'
-  const refLink = profile?.referral_code ? `${siteUrl.replace(/^https?:\/\//, '')}/ref/${profile.referral_code}` : null
+  // Full URL is what users actually share — strip-host display is confusing
+  // when they paste it elsewhere ("chariotarchive.com/ref/..." isn't clickable).
+  const refLink = profile?.referral_code ? `${siteUrl.replace(/\/$/, '')}/ref/${profile.referral_code}` : null
 
   // Activity ledger: completed orders (deposits) + credit events, newest first.
   type Activity = { when: string; what: string; amt: string; credit: boolean }
@@ -177,6 +208,7 @@ export default async function AccountPage() {
           </div>
 
           <section className="mcard reveal" aria-label="Membership card">
+            <div className="mcard__corners" aria-hidden="true" />
             <div className="mcard__mark"><img src="/chariot-mark-tight.png" alt="" /></div>
             <div className="mcard__l">
               <span className="mcard__tier">{tier}</span>
@@ -188,7 +220,17 @@ export default async function AccountPage() {
             </div>
             <div className="mcard__no">
               <span className="mcard__no-k">Member No.</span>
-              <span className="mcard__no-v">{memberNo ?? '—'}</span>
+              <span
+                className={`mcard__no-v${memberNo ? '' : ' mcard__no-v--pending'}`}
+                aria-label={memberNo ? `Member number ${profile!.member_number}` : 'Member number pending'}
+              >
+                {memberNo ?? '— — —'}
+              </span>
+              {!memberNo && (
+                <span className="mcard__no-note">
+                  Assigned the moment your founding deposit clears.
+                </span>
+              )}
             </div>
           </section>
 
@@ -200,18 +242,43 @@ export default async function AccountPage() {
             </div>
             <div className="panel">
               <div className="panel__k">Referrals — {credited} of 3</div>
-              {refLink && (
+              <p className="refl__how">
+                Share your link below. When a friend uses it to claim a founding spot,
+                you both get $5 in store credit — capped at three friends.
+              </p>
+              {refLink ? (
                 <div className="refl__row">
                   <span className="refl__link" data-ref-link>{refLink}</span>
-                  <button className="refl__copy" data-copy aria-label="Copy referral link">Copy</button>
+                  <button className="refl__copy" data-copy aria-label="Copy referral link">
+                    <span className="refl__copy-icons" aria-hidden="true">
+                      <svg className="refl__copy-icon refl__copy-icon--copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                      <svg className="refl__copy-icon refl__copy-icon--check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
+                    <span className="refl__copy-label">Copy</span>
+                  </button>
                 </div>
+              ) : (
+                <p className="refl__meta">
+                  Your referral link is generated the moment you finish signup —
+                  if it’s missing here, refresh the page.
+                </p>
               )}
+              <ol className="refl__steps">
+                <li>Copy your link and send it to a friend.</li>
+                <li>They claim a founding spot through your link.</li>
+                <li>$5 in Drop&nbsp;1 credit lands in both of your accounts.</li>
+              </ol>
               <div className="refl__progress" aria-hidden="true">
                 {[0, 1, 2].map((i) => (
                   <span key={i} className={`refl__pip${i < credited ? ' is-on' : ''}`}></span>
                 ))}
               </div>
-              <p className="refl__meta">$5 credit per friend who claims a founding spot.</p>
+              <p className="refl__meta">{3 - credited > 0 ? `${3 - credited} left to unlock` : 'Maxed out — thank you'}.</p>
             </div>
           </div>
 
@@ -226,8 +293,20 @@ export default async function AccountPage() {
                 </div>
               ))
             ) : (
-              <div className="acct-row">
-                <span className="acct-row__what">No activity yet.</span>
+              <div className="acct-empty" role="status" aria-live="polite">
+                <svg className="acct-empty__mark" viewBox="0 0 64 64" aria-hidden="true">
+                  {/* Editorial compass mark — points east (toward Austin from Accra). */}
+                  <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M32 14 L34 32 L32 50 L30 32 Z" fill="currentColor" opacity="0.18" />
+                  <path d="M14 32 L32 30 L50 32 L32 34 Z" fill="currentColor" />
+                  <circle cx="32" cy="32" r="2" fill="currentColor" />
+                </svg>
+                <div className="acct-empty__copy">
+                  <h3 className="acct-empty__title">Your activity will show here.</h3>
+                  <p className="acct-empty__desc">
+                    Your first transaction lands when Drop&nbsp;1 opens. The window opens August&nbsp;2026 — we&rsquo;ll email you the moment it&rsquo;s live.
+                  </p>
+                </div>
               </div>
             )}
           </section>

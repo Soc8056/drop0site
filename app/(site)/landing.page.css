@@ -3,16 +3,66 @@
    Loaded after chariot.css. Page-specific modules only.
    ============================================================ */
 
-/* ---- Sticky mobile claim bar ---- */
+/* ---- Sticky mobile claim bar ----
+   Mobile dock pattern inspired by Magic MCP bottom-nav components:
+   primary CTA gets the gold treatment, secondary metadata sits left,
+   and the entire bar honours iOS safe-area-inset so the home indicator
+   doesn't sit on top of it. The bar appears only below 720px (set in
+   the mobile media query block) — desktop hides it entirely. */
 .stickycta {
   position: fixed; inset: auto 0 0 0; z-index: 55; display: none;
-  align-items: center; justify-content: space-between; gap: 16px;
+  align-items: center; justify-content: space-between; gap: 14px;
   padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
-  background: var(--color-ink); color: var(--color-salt); border-top: 1px solid var(--line-ink);
+  background: var(--color-ink); color: var(--color-salt);
+  border-top: 1px solid var(--line-ink);
+  /* Subtle backdrop blur so the hero peeks through behind the bar at
+     scroll, gives a more premium feel. Falls back gracefully when
+     backdrop-filter isn't supported. */
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  background: rgba(17, 17, 17, 0.92);
+  /* Smooth slide-in when entering mobile breakpoints. */
+  transform: translateY(0);
+  transition: transform var(--dur-move) var(--ease-calm);
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .stickycta { background: var(--color-ink); }
 }
 .stickycta__l { display: flex; flex-direction: column; line-height: 1.2; }
-.stickycta__price { font-family: var(--font-display); font-weight: var(--fw-semi); font-size: var(--fs-20); }
-.stickycta__note { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--on-ink-3); }
+.stickycta__price {
+  font-family: var(--font-display); font-weight: var(--fw-semi);
+  font-size: var(--fs-20);
+  /* Inline gold dot signals affordance — "this is the claim CTA". */
+  position: relative; padding-left: 14px;
+}
+.stickycta__price::before {
+  content: ''; position: absolute; left: 0; top: 50%;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--signal-gold); transform: translateY(-50%);
+  box-shadow: 0 0 0 2px rgba(201, 146, 30, 0.18);
+  animation: stickyPulse 2.6s ease-in-out infinite;
+}
+@keyframes stickyPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(201, 146, 30, 0.18); }
+  50%      { box-shadow: 0 0 0 5px rgba(201, 146, 30, 0.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stickycta__price::before { animation: none; }
+}
+.stickycta__note {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  /* Bumped from --on-ink-3 (0.46 alpha) to a tighter on-ink-2-style alpha
+     for AA contrast on small caps copy. */
+  color: rgba(250, 250, 248, 0.72);
+  padding-left: 14px;
+}
+/* The button gets a comfortable tap area + native gold treatment. */
+.stickycta > .btn { min-height: 44px; }
+.stickycta > .btn:focus-visible {
+  outline: 2px solid var(--signal-gold);
+  outline-offset: 3px;
+}
 
 /* ============================================================ HERO — single committed frame */
 .hero { position: relative; min-height: 82svh; display: flex; align-items: flex-end; overflow: hidden; background: var(--color-ink); padding-top: 92px; }
@@ -45,8 +95,39 @@
 .hero__counter-n { font-family: var(--font-mono); font-size: var(--fs-13); letter-spacing: var(--ls-wide); color: var(--color-salt); white-space: nowrap; }
 .hero__counter-n b { color: var(--signal-gold); font-weight: var(--fw-medium); }
 .hero__counter-win { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide); text-transform: uppercase; color: rgba(250,250,248,0.7); white-space: nowrap; }
-.hero__counter-bar { height: 2px; background: rgba(250,250,248,0.22); overflow: hidden; }
-.hero__counter-fill { height: 100%; background: var(--signal-gold); width: 34%; }
+.hero__counter-bar {
+  position: relative; height: 2px; background: rgba(250,250,248,0.22); overflow: visible;
+}
+/* Milestone tick marks at 25 / 50 / 75 — silent, brand-aligned. */
+.hero__counter-bar::before,
+.hero__counter-bar::after {
+  content: ""; position: absolute; top: -3px; width: 1px; height: 8px;
+  background: rgba(250,250,248,0.32); pointer-events: none;
+}
+.hero__counter-bar::before { left: 25%; }
+.hero__counter-bar::after  { left: 75%; }
+.hero__counter-fill {
+  position: relative; height: 100%; background: var(--signal-gold); width: 34%;
+  transition: width 600ms var(--ease-calm);
+}
+/* Live pulsing dot at the leading edge of the fill — Magic MCP "live signal"
+   pattern, ported to vanilla CSS. Tells the visitor the count is current. */
+.hero__counter-fill::after {
+  content: ""; position: absolute; right: -3px; top: 50%;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--signal-gold);
+  transform: translateY(-50%);
+  box-shadow: 0 0 0 0 rgba(201, 146, 30, 0.6);
+  animation: heroCounterPulse 1.8s var(--ease-calm) infinite;
+}
+@keyframes heroCounterPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(201, 146, 30, 0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(201, 146, 30, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(201, 146, 30, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero__counter-fill::after { animation: none; }
+  .hero__counter-fill { transition: none; }
+}
 .hero__trust { margin-top: 16px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide); color: rgba(250,250,248,0.66); }
 
 /* ============================================================ MARQUEE */
@@ -77,7 +158,28 @@
 
 /* ============================================================ BENEFITS (what you get) */
 .b3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); }
-.b3card { background: var(--bg-page); padding: clamp(30px, 4vw, 52px); display: flex; flex-direction: column; }
+.b3card {
+  background: var(--bg-page);
+  padding: clamp(30px, 4vw, 52px);
+  display: flex; flex-direction: column;
+  /* Subtle hover lift — Magic MCP "translateY(-3px) + box-shadow" pattern,
+     ported to vanilla CSS. Pulls the value-prop card forward on intent
+     without committing to a layout shift. */
+  transition:
+    background var(--dur-state) var(--ease-calm),
+    box-shadow var(--dur-state) var(--ease-calm),
+    transform var(--dur-state) var(--ease-calm);
+  will-change: transform;
+}
+.b3card:hover {
+  background: var(--color-salt);
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px -10px rgba(17, 17, 17, 0.18), 0 1px 0 var(--border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .b3card { transition: none; }
+  .b3card:hover { transform: none; }
+}
 .b3card__amt { font-family: var(--font-display); font-weight: var(--fw-medium); font-size: clamp(52px, 7vw, 92px); line-height: 1; color: var(--signal-gold); letter-spacing: var(--ls-tight); }
 .b3card__h { font-family: var(--font-display); font-weight: var(--fw-medium); font-size: var(--fs-24); letter-spacing: var(--ls-tight); margin: var(--space-5) 0 var(--space-3); }
 .b3card__p { font-family: var(--font-body); font-size: var(--fs-16); line-height: var(--lh-body); color: var(--fg-2); }
@@ -90,10 +192,34 @@
 .brandfeat__loc { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--signal-gold); }
 .brandfeat__name { font-family: var(--font-display); font-weight: var(--fw-medium); font-size: clamp(44px, 5vw, 72px); letter-spacing: var(--ls-tight); line-height: 1; margin: var(--space-4) 0 var(--space-5); color: var(--color-salt); }
 .brandfeat__p { font-family: var(--font-body); font-size: var(--fs-18); line-height: 1.62; color: var(--on-ink-2); max-width: 46ch; }
-.brandfeat .quote { margin: var(--space-6) 0 0; padding-left: var(--space-5); border-left: 2px solid var(--signal-gold);
-  font-family: var(--font-body); font-style: italic; font-size: var(--fs-24); line-height: 1.4; color: var(--color-salt); }
-.brandfeat .quote cite { display: block; margin-top: var(--space-4); font-family: var(--font-mono); font-style: normal;
-  font-size: var(--fs-12); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--on-ink-3); }
+/* Magic MCP "editorial pull-quote with oversized quote marks" pattern,
+   ported to vanilla CSS. The opening quote mark sits above and to the left
+   of the body text in display serif, giving the moment a magazine-pull
+   weight without a heavy quote-glyph image. */
+.brandfeat .quote {
+  position: relative;
+  margin: var(--space-6) 0 0;
+  padding-left: var(--space-5);
+  border-left: 2px solid var(--signal-gold);
+  font-family: var(--font-display); font-style: italic;
+  font-size: clamp(20px, 2.4vw, 28px); line-height: 1.32;
+  color: var(--color-salt);
+}
+.brandfeat .quote::before {
+  content: "\201C";  /* fancy left double-quotation mark, not the typewriter " */
+  position: absolute;
+  left: var(--space-5); top: -0.45em;
+  font-family: var(--font-display); font-style: normal;
+  font-size: clamp(58px, 6vw, 86px); line-height: 1; font-weight: var(--fw-medium);
+  color: var(--signal-gold); opacity: 0.32;
+  pointer-events: none;
+}
+.brandfeat .quote cite {
+  display: block; margin-top: var(--space-4);
+  font-family: var(--font-mono); font-style: normal;
+  font-size: var(--fs-12); letter-spacing: var(--ls-wide); text-transform: uppercase;
+  color: var(--on-ink-3);
+}
 .brandfeat__cta { margin-top: var(--space-6); }
 
 /* ============================================================ LOOKBOOK — View All carousel */
@@ -106,17 +232,58 @@
   scrollbar-width: none;
 }
 .lookrail::-webkit-scrollbar { display: none; }
-.lb { scroll-snap-align: start; display: flex; flex-direction: column; }
+.lb {
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: inherit;
+  /* Make the hover state pointer-obvious for cards rendered as <a>s. */
+  cursor: pointer;
+  transition: opacity var(--dur-state) var(--ease-calm);
+}
+.lb:focus-visible {
+  outline: 3px solid var(--signal-gold);
+  outline-offset: 2px;
+}
 .lb__img { position: relative; aspect-ratio: 4/5; overflow: hidden; background: var(--bg-surface); }
 .lb__img img { width: 100%; height: 100%; object-fit: cover; transition: transform .8s var(--ease-calm); }
 .lb:hover .lb__img img { transform: scale(1.05); }
+/* Magic MCP "vignette-on-hover" pattern: a 30% bottom gradient scrim fades
+   in over the image so the .lb__brand pill (in upper-left) reads more
+   confidently and the eye reads the card as actively reviewed. */
+.lb__img::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(17,17,17,0.32) 0%, transparent 35%);
+  opacity: 0; transition: opacity var(--dur-move) var(--ease-calm);
+  pointer-events: none;
+}
+.lb:hover .lb__img::after { opacity: 1; }
+/* Calm hover affordance for the meta below the image (color-only, no layout shift). */
+.lb:hover .lb__name { color: var(--signal-gold); }
+@media (prefers-reduced-motion: reduce) {
+  .lb__img img { transition: none; }
+  .lb:hover .lb__img img { transform: none; }
+}
 .lb__brand { position: absolute; top: 12px; left: 12px; font-family: var(--font-mono); font-size: 10px;
   letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--color-salt);
   background: var(--overlay-scrim, rgba(17,17,17,0.72)); backdrop-filter: blur(8px); padding: 6px 10px; }
 .lb__meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: var(--space-4); }
 .lb__name { font-family: var(--font-display); font-weight: var(--fw-medium); font-size: var(--fs-18); letter-spacing: var(--ls-tight); }
 .lb__price { text-align: right; white-space: nowrap; }
-.lb__credit { font-family: var(--font-mono); font-size: var(--fs-18); color: var(--signal-gold); }
+/* Gold (#C9921E) on dust (#E4DDD4) ≈ 3.5:1 — fails WCAG AA for body text.
+   Switch to ink for the price; the gold is reused on the dark/ink sections
+   where it has ~6:1 contrast and is fine. Keeps editorial aesthetic by
+   underlining + a small gold accent below. */
+.lb__credit {
+  font-family: var(--font-mono); font-size: var(--fs-18);
+  color: var(--color-ink); font-weight: var(--fw-medium);
+  position: relative; display: inline-block;
+}
+.lb__credit::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -3px;
+  height: 1px; background: var(--signal-gold);
+}
 .lb__retail { display: block; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--fg-2); text-decoration: line-through; margin-top: 3px; }
 .railnav { display: flex; gap: 8px; }
 .railbtn { width: 46px; height: 46px; border: 1px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; color: var(--fg-1); transition: background var(--dur-state) var(--ease-calm), color var(--dur-state); }
@@ -125,6 +292,35 @@
 .railbtn:hover[disabled] { background: none; color: var(--fg-1); }
 .railbtn svg { width: 18px; height: 18px; }
 .lookbook__note { margin-top: var(--space-6); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide); color: var(--fg-2); }
+
+/* Terminal carousel tile — intentional editorial card, not a missing image.
+   Reuses the same aspect-ratio and layout as a product tile so the rail
+   reads as a single rhythm; ink background and gold copy make the purpose
+   obvious at a glance. */
+.lb--more .lb__img--more {
+  background: var(--color-ink);
+  color: var(--color-salt);
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: clamp(22px, 2.4vw, 30px);
+  gap: var(--space-3);
+  text-align: left;
+}
+.lb__more-eye {
+  font-family: var(--font-mono); font-size: var(--fs-12);
+  letter-spacing: var(--ls-wider); text-transform: uppercase;
+  color: var(--signal-gold);
+}
+.lb__more-line {
+  font-family: var(--font-display); font-weight: var(--fw-medium);
+  font-size: clamp(20px, 2vw, 26px); line-height: 1.18;
+  letter-spacing: var(--ls-tight); max-width: 18ch;
+}
+.lb__more-cta {
+  margin-top: auto; align-self: flex-start;
+  font-family: var(--font-mono); font-size: var(--fs-13);
+  letter-spacing: var(--ls-wide); text-transform: uppercase;
+}
+.lb--more:hover .lb__img--more { background: var(--color-shadow, #1a1a1a); }
 
 /* ============================================================ SHOP THE LOOK (editorial) */
 .stl { display: grid; grid-template-columns: 1.12fr 1fr; gap: clamp(28px, 4vw, 64px); align-items: center; }
@@ -138,6 +334,11 @@
   display: grid; grid-template-columns: 62px 1fr auto; gap: var(--space-4); align-items: center;
   padding: var(--space-4) 0; border-top: 1px solid var(--border); text-decoration: none; color: inherit;
   transition: opacity var(--dur-state) var(--ease-calm);
+  cursor: pointer;
+}
+.stl__row:focus-visible {
+  outline: 3px solid var(--signal-gold);
+  outline-offset: -2px;
 }
 .stl__row:last-of-type { border-bottom: 1px solid var(--border); }
 .stl__row:hover { opacity: 0.66; }
@@ -153,11 +354,30 @@
 /* ============================================================ VOTED MODEL BAND ("the drop you voted for") */
 .voted__head { max-width: 740px; margin-bottom: clamp(36px, 5vw, 64px); }
 .voted-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line-ink); border: 1px solid var(--line-ink); }
-.vstep { background: var(--color-ink); padding: clamp(28px, 3.4vw, 46px); display: flex; flex-direction: column; }
+/* Magic MCP "connecting line between steps" pattern: a thin gold rule
+   spans the top of the 3-step grid, visually tying 01 → 02 → 03 together
+   so the visitor reads it as a sequence rather than three standalone cards.
+   Hidden on mobile where the steps stack vertically. */
+.voted-steps {
+  position: relative;
+}
+.voted-steps::before {
+  content: ""; position: absolute; left: 12%; right: 12%; top: 0;
+  height: 1px; background: linear-gradient(to right,
+    transparent 0%, var(--signal-gold) 18%, var(--signal-gold) 82%, transparent 100%);
+  pointer-events: none;
+}
+.vstep { position: relative; background: var(--color-ink); padding: clamp(28px, 3.4vw, 46px); display: flex; flex-direction: column;
+  transition: background var(--dur-state) var(--ease-calm); }
+.vstep:hover { background: var(--color-shadow, #1a1a1a); }
 .vstep__n { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wider); text-transform: uppercase; color: var(--signal-gold); }
 .vstep__h { font-family: var(--font-display); font-weight: var(--fw-medium); font-size: clamp(26px, 3vw, 40px); letter-spacing: var(--ls-tight); line-height: 1; color: var(--color-salt); margin: var(--space-5) 0 var(--space-4); }
 .vstep__d { font-family: var(--font-body); font-size: var(--fs-16); line-height: 1.6; color: var(--on-ink-2); }
-@media (max-width: 760px) { .voted-steps { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .voted-steps { grid-template-columns: 1fr; }
+  /* On mobile the steps stack — no horizontal connecting line. */
+  .voted-steps::before { display: none; }
+}
 
 /* ============================================================ THE MATH, SHOWN (operational transparency) */
 .math { display: grid; grid-template-columns: 1.1fr 1fr; gap: clamp(28px, 4vw, 64px); align-items: center; }
@@ -183,12 +403,22 @@
 .compare__head { border-bottom: 1px solid var(--border); }
 .compare__head span { padding: 18px 22px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide); text-transform: uppercase; }
 .compare__col--direct { color: var(--fg-2); }
-.compare__col--us { color: var(--signal-gold); background: rgba(201,146,30,0.07); }
+/* Magic MCP "highlighted column" pattern: the Chariot column gets a faint
+   gold tint plus a thin gold rail on its left edge so the eye reads it as
+   the recommended choice without a heavy "POPULAR" badge. */
+.compare__col--us {
+  color: var(--signal-gold); background: rgba(201,146,30,0.09);
+  box-shadow: inset 1px 0 0 var(--signal-gold);
+}
 .compare__row { border-top: 1px solid var(--border); }
 .compare__row span { padding: 18px 22px; font-family: var(--font-body); font-size: var(--fs-16); }
 .compare__label { font-family: var(--font-mono) !important; font-size: var(--fs-13) !important; letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--fg-1); }
 .compare__direct { color: var(--fg-2); }
-.compare__us { display: flex; align-items: center; gap: 10px; color: var(--fg-1); background: rgba(201,146,30,0.07); }
+.compare__us {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--fg-1); background: rgba(201,146,30,0.09);
+  box-shadow: inset 1px 0 0 var(--signal-gold);
+}
 .compare__us svg { width: 16px; height: 16px; color: var(--signal-gold); flex: none; }
 
 /* ============================================================ DOSSIER */
@@ -199,10 +429,27 @@
 .dnode__t { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--on-ink-2); margin-bottom: var(--space-3); }
 .dnode__d { font-family: var(--font-body); font-size: var(--fs-16); line-height: var(--lh-body); color: var(--on-ink-2); }
 
-/* ============================================================ TIMELINE */
+/* ============================================================ TIMELINE
+   Magic MCP timeline pattern, ported native: the current ("Now") node gets
+   a pulsing gold dot anchored at the top edge, signalling "you are here". */
 .tl { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--border); }
-.tl__node { padding: 30px 24px 30px 0; border-top: 2px solid transparent; margin-top: -1px; }
+.tl__node { position: relative; padding: 30px 24px 30px 0; border-top: 2px solid transparent; margin-top: -1px; }
 .tl__node--now { border-top-color: var(--signal-gold); }
+.tl__node--now::before {
+  content: ""; position: absolute; left: 0; top: -6px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--signal-gold);
+  box-shadow: 0 0 0 0 rgba(201, 146, 30, 0.55);
+  animation: tlNowPulse 1.8s var(--ease-calm) infinite;
+}
+@keyframes tlNowPulse {
+  0%   { box-shadow: 0 0 0 0    rgba(201, 146, 30, 0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(201, 146, 30, 0); }
+  100% { box-shadow: 0 0 0 0    rgba(201, 146, 30, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl__node--now::before { animation: none; }
+}
 .tl__when { display: block; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--fg-2); margin-bottom: var(--space-3); }
 .tl__node--now .tl__when { color: var(--signal-urgent); }
 .tl__what { font-family: var(--font-display); font-weight: var(--fw-medium); font-size: var(--fs-20); letter-spacing: var(--ls-tight); line-height: 1.2; }
@@ -212,10 +459,23 @@
 .news__h { font-family: var(--font-display); font-weight: var(--fw-medium); font-size: clamp(30px,3.4vw,52px); letter-spacing: var(--ls-tight); line-height: 1.05; color: var(--color-salt); }
 .news__p { font-family: var(--font-body); font-size: var(--fs-18); line-height: var(--lh-body); color: var(--on-ink-2); margin-top: var(--space-4); max-width: 40ch; }
 .news__form { display: flex; flex-direction: column; gap: var(--space-3); }
-.news__row { display: flex; gap: var(--space-2); }
+/* Magic MCP "focus-within ring" pattern: when the input is focused, the
+   whole row glows gold so the button and input read as a single control. */
+.news__row {
+  display: flex; gap: var(--space-2);
+  border-radius: var(--radius-1);
+  transition: box-shadow var(--dur-state) var(--ease-calm);
+}
+.news__row:focus-within {
+  box-shadow: 0 0 0 3px rgba(201, 146, 30, 0.28);
+}
 .news__row .input { background: rgba(250,250,248,0.05); border-color: var(--line-ink); color: var(--color-salt); flex: 1; }
 .news__row .input::placeholder { color: var(--on-ink-3); }
-.news__row .input:focus { border-color: rgba(250,250,248,0.6); }
+/* :focus-visible (not :focus) so mouse clicks don't show a heavy ring on
+   top of the row-level focus-within glow. */
+.news__row .input:focus-visible {
+  border-color: var(--signal-gold); outline: none;
+}
 .news__note { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--ls-wide); color: var(--on-ink-3); }
 .news__ok { font-family: var(--font-mono); font-size: var(--fs-13); letter-spacing: var(--ls-wide); color: var(--signal-gold); display: none; }
 .news__ok.is-on { display: block; }
